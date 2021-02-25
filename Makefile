@@ -15,25 +15,31 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-TS_RUNROOT:=$(shell pwd)
-PATH:=$(PATH):/opt/h2load/bin
-YSECURE_UNSAFE_LOCK_CALLBACKS=2
-#ATS_DIR=/opt/ats
-ATS_DIR=/opt/amd/trafficserver/9.0/
+ATS_DIR=/home/wkaras/TSX/BASE
+
+H2LOAD=/opt/oath/nghttp2/1.36/bin/h2load
 
 test:
+	ps -ef | fgrep /traffic_server | fgrep -v grep | ( read N P J ; kill $$P ) || echo IGNORE
+	sleep 2
 	$(MAKE) http
+	ps -ef | fgrep /traffic_server | fgrep -v grep | ( read N P J ; kill $$P )
+	sleep 2
 	$(MAKE) https
+	ps -ef | fgrep /traffic_server | fgrep -v grep | ( read N P J ; kill $$P )
+	sleep 2
 	$(MAKE) http2
+	ps -ef | fgrep /traffic_server | fgrep -v grep | ( read N P J ; kill $$P )
+	sleep 2
 
 # Step 1 - setup the test
 setup:
-	#sudo $(ATS_DIR)/bin/trafficserver stop
-	sudo systemctl stop trafficserver9
-	sudo rm -f $(ATS_DIR)/var/log/trafficserver/squid.blog*
-	sudo systemctl start trafficserver9
-	#sudo $(ATS_DIR)/bin/trafficserver start
+	# rm $(ATS_DIR)//var/trafficserver/server.lock || echo IGNORE
+	rm -f $(ATS_DIR)/var/log/trafficserver/squid.blog*
+	TS_ROOT=$(ATS_DIR) LD_LIBRARY_PATH=$(ATS_DIR)/lib $(ATS_DIR)/bin/traffic_server &
 	rm -f *.log perf.data*
+	sleep 2
+	#ss --listening -n --tcp
 
 # Step 2 - prime the cache
 prime_http:
@@ -52,20 +58,23 @@ log_start:
 
 # Step 4 - run the benchmark
 bench_http:
-	h2load --h1 -t 30 -n 500000 -c 200 `cat urls.http.config | xargs` | tail -9 > h2load.log
+	$(H2LOAD) --h1 -t 30 -n 500000 -c 200 `cat urls.http.config | xargs` | tail -9 > h2load.log
 
 bench_https:
-	h2load --h1 -t 30 -n 500000 -c 200 `cat urls.https.config | xargs` | tail -9 > h2load.log
+	$(H2LOAD) --h1 -t 30 -n 500000 -c 200 `cat urls.https.config | xargs` | tail -9 > h2load.log
 
 bench_http2:
-	h2load -t 30 -n 1000000 -c 200 `cat urls.https.config | xargs` | tail -9 > h2load.log
+	$(H2LOAD) -t 30 -n 1000000 -c 200 `cat urls.https.config | xargs` | tail -9 > h2load.log
 
 # Step 5 - stop loggging performance data
 log_stop:
 	kill `ps axuw | grep dsta[t] | awk '{print $$2}'`
-	sudo killall -s SIGINT perf
-	sudo killall -s SIGINT perf || echo "it's ok"
-	while [ `ps axuw | grep perf | grep -v grep | wc -l` != '0' ]; do echo "perf still running"; sleep 1; done
+	sudo bash -c 'ps -ef | fgrep perf | fgrep -v grep | fgrep -v sudo | while read N P J ; do kill -s SIGINT $$P ; done'
+	sleep 2
+	sudo bash -c 'ps -ef | fgrep perf | fgrep -v grep | fgrep -v sudo | while read N P J ; do kill -s SIGINT $$P ; done'
+	#killall -s SIGINT perf
+	#killall -s SIGINT perf || echo "it's ok"
+	while [ `ps -ef | grep perf | grep -v grep | wc -l` != '0' ]; do echo "perf still running" | fgrep perf ; sleep 1; done
 	sleep 1
 	sudo perf report -sdso,symbol --stdio  -w10,20,50 | grep -v h2load | grep -v swapper | head -150 | tail -147 > perf-report.log
 
